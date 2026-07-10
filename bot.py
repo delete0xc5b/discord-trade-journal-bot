@@ -78,7 +78,7 @@ async def on_ready():
 @app_commands.describe(
     ticker="The asset you traded (e.g., AAPL, ES, BTC)",
     direction="Did you go Long or Short?",
-    position_size="Size of your position (USD)",
+   $ position_size="Size of your position (USD)",
     entry_price="The price you entered the trade at",
     closed_price="The price you closed the trade at",
     pnl="Net profit or loss (use negative for loss)",
@@ -98,7 +98,7 @@ async def log_trade(
     direction: app_commands.Choice[str], 
     entry_price: float,
     closed_price: float,
-    position_size: float,
+   $ position_size: float,
     pnl: float, 
     setup: str, 
     image: discord.Attachment = None,
@@ -138,7 +138,7 @@ async def log_trade(
     embed.add_field(name="Direction", value=direction.name, inline=True)
     embed.add_field(name="Setup", value=setup, inline=True)
     embed.add_field(name="PnL", value=pnl_string, inline=True)
-    embed.add_field(name="Position Size", value=f"{position_size:,.2f}", inline=True)
+    embed.add_field(name="Position Size", value=f"${position_size:,.2f}", inline=True)
     embed.add_field(name="Entry Price", value=f"${entry_price:,.2f}", inline=True)
     embed.add_field(name="Closed Price", value=f"${closed_price:,.2f}", inline=True)
     

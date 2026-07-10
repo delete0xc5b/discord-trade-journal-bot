@@ -1,38 +1,64 @@
 import os
-import sqlite3
 import discord
+import psycopg2  # Swapped from sqlite3
 from dotenv import load_dotenv
 from discord.ext import commands
 from discord import app_commands
+from aiohttp import web  # For the Render keep-alive server
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+# Connect to Supabase Postgres Database
+conn = psycopg2.connect(DATABASE_URL)
+cursor = conn.cursor()
 
 # Initialize bot with default intents
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Connect to a local file (creates it if it doesn't exist)
-conn = sqlite3.connect('trading_journal.db')
-cursor = conn.cursor()
+# ==========================================
+# WEB SERVER LOGIC (RENDER KEEP-ALIVE)
+# ==========================================
+async def handle_ping(request):
+    return web.Response(text="Bot is awake and running!")
 
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render automatically assigns a PORT env variable. Defaults to 8080 locally.
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Web server listening on port {port}")
+
+# ==========================================
+# BOT EVENTS
+# ==========================================
 @bot.event
 async def on_ready():
-    # Create the trades table with all columns
+    # Start the dummy web server to keep Render awake
+    await start_web_server()
+
+    # Create the trades table with Postgres compatible syntax (SERIAL instead of AUTOINCREMENT)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS trades (
-            trade_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
+            trade_id SERIAL PRIMARY KEY,
+            user_id BIGINT,
             trader_name TEXT,
             ticker TEXT,
             direction TEXT,
-            entry_price REAL,  -- Added missing column
-            closed_price REAL, -- Added missing column
+            entry_price REAL,
+            closed_price REAL,
             pnl REAL,
             setup TEXT,
             image_url TEXT,
             notes TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
@@ -84,14 +110,15 @@ async def log_trade(
     trader_name = interaction.user.display_name
     image_url = image.url if image else None
     
-    # Save the actual trade data into the database
+    # Save the actual trade data using %s placeholders for Postgres
     cursor.execute('''
         INSERT INTO trades (user_id, trader_name, ticker, direction, entry_price, closed_price, pnl, setup, image_url, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING trade_id
     ''', (user_id, trader_name, ticker, direction.value, entry_price, closed_price, pnl, setup, image_url, notes))
     
-    # Grab the ID IMMEDIATELY after execute, BEFORE commit (fixes the #0 bug)
-    trade_id = cursor.lastrowid
+    # Grab the ID returned by the Postgres insert statement
+    trade_id = cursor.fetchone()[0]
     conn.commit()
 
     # 2. Embed Logic
@@ -124,18 +151,18 @@ async def log_trade(
 
 # ==========================================
 # COMMAND 2: /stats
-# This must be a completely separate stack
 # ==========================================
 @bot.tree.command(name="stats", description="Calculate win rate and total PnL.")
 @app_commands.describe(target_user="View stats for a specific user (optional)")
 async def stats(interaction: discord.Interaction, target_user: discord.Member = None):
     user = target_user or interaction.user
     
-    cursor.execute('SELECT pnl FROM trades WHERE user_id = ?', (user.id,))
+    # Changed ? placeholder to %s for Postgres
+    cursor.execute('SELECT pnl FROM trades WHERE user_id = %s', (user.id,))
     trades = cursor.fetchall()
     
     if not trades:
-        await interaction.response.send_message(f"{user.display_name} hasn't logged any trades yet.", ephemeral=True)
+        await interaction.response.send_message(f"{user.display_name} hasn't logged any trades yet.", ephemeral=False)
         return
 
     total_trades = len(trades)
@@ -161,6 +188,7 @@ async def stats(interaction: discord.Interaction, target_user: discord.Member = 
     
     await interaction.response.send_message(embed=embed)
 
+
 # ==========================================
 # COMMAND 3: /del
 # ==========================================
@@ -169,11 +197,10 @@ async def stats(interaction: discord.Interaction, target_user: discord.Member = 
 async def del_trade(interaction: discord.Interaction, trade_id: int):
     user_id = interaction.user.id
     
-    # 1. Check if the trade exists AND belongs to the user who typed the command
-    cursor.execute('SELECT ticker, pnl FROM trades WHERE trade_id = ? AND user_id = ?', (trade_id, user_id))
+    # Changed ? placeholders to %s for Postgres
+    cursor.execute('SELECT ticker, pnl FROM trades WHERE trade_id = %s AND user_id = %s', (trade_id, user_id))
     trade = cursor.fetchone()
     
-    # If fetchone() returns None, the trade either doesn't exist or isn't theirs
     if not trade:
         await interaction.response.send_message(
             f"❌ Could not find Trade #{trade_id}. It might have already been deleted, or it belongs to another user.", 
@@ -181,20 +208,16 @@ async def del_trade(interaction: discord.Interaction, trade_id: int):
         )
         return
         
-    # Extract the data so we can tell them exactly what was deleted
     ticker, pnl = trade
     
-    # 2. Delete the trade from the database
-    cursor.execute('DELETE FROM trades WHERE trade_id = ? AND user_id = ?', (trade_id, user_id))
+    # Changed ? placeholders to %s for Postgres
+    cursor.execute('DELETE FROM trades WHERE trade_id = %s AND user_id = %s', (trade_id, user_id))
     conn.commit()
     
-    # 3. Send a confirmation message
-    # Format the PnL nicely for the confirmation message
     pnl_string = f"+${pnl:,.2f}" if pnl >= 0 else f"-${abs(pnl):,.2f}"
     
     await interaction.response.send_message(
-        f"Successfully deleted Trade #{trade_id} ({ticker} : {pnl_string}).", 
-        # ephemeral=True
+        f"Successfully deleted Trade #{trade_id} ({ticker} : {pnl_string})."
     )
 
 # Run the bot

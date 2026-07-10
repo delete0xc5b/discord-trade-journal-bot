@@ -78,7 +78,7 @@ async def on_ready():
 @app_commands.describe(
     ticker="The asset you traded (e.g., AAPL, ES, BTC)",
     direction="Did you go Long or Short?",
-   $ position_size="Size of your position (USD)",
+    position_size="Size of your position (USD)",
     entry_price="The price you entered the trade at",
     closed_price="The price you closed the trade at",
     pnl="Net profit or loss (use negative for loss)",
@@ -98,7 +98,7 @@ async def log_trade(
     direction: app_commands.Choice[str], 
     entry_price: float,
     closed_price: float,
-   $ position_size: float,
+   position_size: float,
     pnl: float, 
     setup: str, 
     image: discord.Attachment = None,

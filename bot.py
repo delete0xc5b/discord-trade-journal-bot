@@ -79,7 +79,7 @@ async def log_trade(
     direction: app_commands.Choice[str], 
     entry_price: float,
     closed_price: float,
-   position_size: float,
+    position_size: float,
     pnl: float, 
     setup: str, 
     image: discord.Attachment = None,

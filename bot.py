@@ -370,7 +370,7 @@ async def automated_reports():
             embed.add_field(name="Annual Win Rate", value=f"{win_rate:.1f}%", inline=True)
             embed.add_field(name="Total Trades", value=str(total_trades), inline=True)
             
-            await channel.send(content="f<@{user_id_str}> here is your yearly performance!", embed=embed)
+            await channel.send(content=f"<@{user_id_str}> here is your yearly performance!", embed=embed)
 
 # Run the bot
 bot.run(DISCORD_TOKEN)

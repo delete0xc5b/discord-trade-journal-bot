@@ -1,6 +1,8 @@
 import os
 import discord
 import psycopg2  # Swapped from sqlite3
+from datetime import datetime
+from typing import Optional
 from dotenv import load_dotenv
 from discord.ext import commands
 from discord import app_commands
@@ -156,18 +158,60 @@ async def log_trade(
 # COMMAND 2: /stats
 # ==========================================
 @bot.tree.command(name="stats", description="Calculate win rate and total PnL.")
-@app_commands.describe(target_user="View stats for a specific user (optional)")
-async def stats(interaction: discord.Interaction, target_user: discord.Member = None):
+@app_commands.describe(
+    month="The month as a number (1-12) (optional)",
+    year="The year (e.g., 2026) (optional)",
+    target_user="View stats for a specific user (optional)"
+)
+async def stats(
+    interaction: discord.Interaction, 
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    target_user: Optional[discord.Member] = None,
+):
     user = target_user or interaction.user
     
-    # Changed ? placeholder to %s for Postgres
-    cursor.execute('SELECT pnl FROM trades WHERE user_id = %s', (user.id,))
+    # 1. Base SQL Query and parameters list
+    # Change 'created_at' to match your actual date column name if different!
+    sql = "SELECT pnl FROM trades WHERE user_id = %s"
+    params = [user.id]
+
+    # 2. Add dynamic filters based on user input
+    if month:
+        if not (1 <= month <= 12):
+            await interaction.response.send_message("❌ Month must be between 1 and 12.", ephemeral=True)
+            return
+        sql += ' AND EXTRACT(MONTH FROM "timestamp") = %s'
+        params.append(month)
+        
+    if year:
+        sql += ' AND EXTRACT(YEAR FROM "timestamp") = %s'
+        params.append(year)
+    elif month:
+        # If they gave a month but skipped the year, default to the current year
+        current_year = datetime.now().year
+        sql += ' AND EXTRACT(YEAR FROM "timestamp") = %s'
+        params.append(current_year)
+
+    # 3. Execute the dynamically built query
+    cursor.execute(sql, tuple(params))
     trades = cursor.fetchall()
     
+    # Define a clean string to show what period we are looking at
+    if month and year:
+        period_str = f" ({month:02d}/{year})"
+    elif month:
+        period_str = f" ({month:02d}/{datetime.now().year})"
+    elif year:
+        period_str = f" ({year})"
+    else:
+        period_str = " (All-Time)"
+
     if not trades:
-        await interaction.response.send_message(f"{user.display_name} hasn't logged any trades yet.", ephemeral=False)
+        await interaction.response.send_message(f"{user.display_name} hasn't logged any trades for this period{period_str}.", ephemeral=False)
         return
 
+    # 4. Perform your math
     total_trades = len(trades)
     winning_trades = sum(1 for trade in trades if trade[0] > 0) 
     
@@ -177,7 +221,7 @@ async def stats(interaction: discord.Interaction, target_user: discord.Member = 
     
     embed_color = discord.Color.green() if total_pnl >= 0 else discord.Color.red()
     embed = discord.Embed(
-        title=f"Trading Stats: {user.display_name}", 
+        title=f"Trading Stats: {user.display_name}{period_str}", 
         color=embed_color
     )
     

@@ -1,3 +1,4 @@
 .env
 trading_journal.db
 __pycache__/
+.idea/

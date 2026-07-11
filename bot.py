@@ -6,7 +6,6 @@ from typing import Optional
 from dotenv import load_dotenv
 from discord.ext import commands
 from discord import app_commands
-from aiohttp import web  # For the Render keep-alive server
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -21,30 +20,10 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# WEB SERVER LOGIC (RENDER KEEP-ALIVE)
-# ==========================================
-async def handle_ping(request):
-    return web.Response(text="Bot is awake and running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    # Render automatically assigns a PORT env variable. Defaults to 8080 locally.
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"Web server listening on port {port}")
-
-# ==========================================
 # BOT EVENTS
 # ==========================================
 @bot.event
 async def on_ready():
-    # Start the dummy web server to keep Render awake
-    await start_web_server()
 
     # Create the trades table with Postgres compatible syntax (SERIAL instead of AUTOINCREMENT)
     cursor.execute('''

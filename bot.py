@@ -1,15 +1,17 @@
 import os
 import discord
 import psycopg2  # Swapped from sqlite3
-from datetime import datetime
+from datetime import datetime, time, timezone
 from typing import Optional
 from dotenv import load_dotenv
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
 load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL')
+REPORTS_CHANNEL_ID = int(os.getenv('REPORTS_CHANNEL_ID'))
+
 
 # Connect to Supabase Postgres Database
 conn = psycopg2.connect(DATABASE_URL)
@@ -50,6 +52,11 @@ async def on_ready():
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         print(e)
+
+    # Automated reports scheduler
+    if not automated_reports.is_running():
+        automated_reports.start()
+        print("Automated report task started")
 
 
 # ==========================================
@@ -246,5 +253,124 @@ async def del_trade(interaction: discord.Interaction, trade_id: int):
         f"Successfully deleted Trade #{trade_id} ({ticker} : {pnl_string})."
     )
 
+
+# ==========================================
+# AUTOMATED REPORTS
+# ==========================================
+
+# Set the time the report runs (e.g., 8:00 AM UTC)
+report_time = time(hour=8, minute=0, tzinfo=timezone.utc)
+
+@tasks.loop(time=report_time)
+async def automated_reports():
+    now = datetime.now()
+
+    # 1. Check if today is the 1st of the month. If not, go back to sleep.
+    if now.day != 1:
+        return
+        
+    channel = bot.get_channel(REPORTS_CHANNEL_ID)
+    guild = channel.guild
+
+    if not channel:
+        print("Error: Could not find the reports channel.")
+        return
+
+    # 2. Determine target dates
+    if now.month == 1:
+        target_month = 12
+        target_year = now.year - 1
+        is_yearly_recap = True
+    else:
+        target_month = now.month - 1
+        target_year = now.year
+        is_yearly_recap = False
+
+    # 3. Monthly Report Logic
+    await channel.send(f"**Monthly Trading Report for {target_month:02d}/{target_year}**")
+    
+    # Find all unique users who traded last month
+    cursor.execute(
+        'SELECT DISTINCT user_id FROM trades WHERE EXTRACT(MONTH FROM "timestamp") = %s AND EXTRACT(YEAR FROM "timestamp") = %s',
+        (target_month, target_year)
+    )
+    users = cursor.fetchall()
+    
+    if not users:
+        await channel.send("No trades were logged this month.")
+    else:
+        # Calculate and post stats for each user
+        for (user_id_str,) in users:
+            cursor.execute(
+                'SELECT pnl FROM trades WHERE user_id = %s AND EXTRACT(MONTH FROM "timestamp") = %s AND EXTRACT(YEAR FROM "timestamp") = %s',
+                (str(user_id_str), target_month, target_year)
+            )
+            trades = cursor.fetchall()
+            
+            total_trades = len(trades)
+            winning_trades = sum(1 for trade in trades if trade[0] > 0) 
+            win_rate = (winning_trades / total_trades) * 100
+            total_pnl = sum(trade[0] for trade in trades)
+            avg_return = total_pnl / total_trades
+            
+            # Fetch user object for their display name
+            try:
+                member = await guild.fetch_member(int(user_id_str))
+            except:
+                member = None
+            display_name = member.display_name if member else f"User {user_id_str}"
+            
+            embed_color = discord.Color.green() if total_pnl >= 0 else discord.Color.red()
+            embed = discord.Embed(title=f"{display_name}'s Monthly Recap", color=embed_color)
+            
+            pnl_string = f"+${total_pnl:,.2f}" if total_pnl >= 0 else f"-${abs(total_pnl):,.2f}"
+            avg_string = f"+${avg_return:,.2f}" if avg_return >= 0 else f"-${abs(avg_return):,.2f}"
+            
+            embed.add_field(name="Total PnL", value=pnl_string, inline=False)
+            embed.add_field(name="Win Rate", value=f"{win_rate:.1f}%", inline=True)
+            embed.add_field(name="Total Trades", value=str(total_trades), inline=True)
+            
+            await channel.send(content=f"<@{user_id_str}> here is your monthly recap!", embed=embed)
+
+    # 4. Yearly Report Logic (Only runs on Jan 1st)
+    if is_yearly_recap:
+        await channel.send(f"🎉 **YEARLY TRADING RECAP FOR {target_year}** 🎉")
+        
+        cursor.execute(
+            'SELECT DISTINCT user_id FROM trades WHERE EXTRACT(YEAR FROM "timestamp") = %s',
+            (target_year,)
+        )
+        yearly_users = cursor.fetchall()
+
+        for (user_id_str,) in yearly_users:
+            cursor.execute(
+                'SELECT pnl FROM trades WHERE user_id = %s AND EXTRACT(YEAR FROM "timestamp") = %s',
+                (str(user_id_str), target_year)
+            )
+            trades = cursor.fetchall()
+            
+            total_trades = len(trades)
+            winning_trades = sum(1 for trade in trades if trade[0] > 0) 
+            win_rate = (winning_trades / total_trades) * 100
+            total_pnl = sum(trade[0] for trade in trades)
+            
+            # Fetch user object for their display name
+            try:
+                member = await guild.fetch_member(int(user_id_str))
+            except:
+                member = None
+            display_name = member.display_name if member else f"User {user_id_str}"
+            
+            embed_color = discord.Color.green() if total_pnl >= 0 else discord.Color.red()
+            embed = discord.Embed(title=f"{display_name}'s {target_year} Performance", color=embed_color)
+            
+            pnl_string = f"+${total_pnl:,.2f}" if total_pnl >= 0 else f"-${abs(total_pnl):,.2f}"
+            
+            embed.add_field(name="Annual PnL", value=pnl_string, inline=False)
+            embed.add_field(name="Annual Win Rate", value=f"{win_rate:.1f}%", inline=True)
+            embed.add_field(name="Total Trades", value=str(total_trades), inline=True)
+            
+            await channel.send(content="f<@{user_id_str}> here is your yearly performance!", embed=embed)
+
 # Run the bot
-bot.run(TOKEN)
+bot.run(DISCORD_TOKEN)

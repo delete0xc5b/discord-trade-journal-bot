@@ -13,7 +13,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 REPORTS_CHANNEL_ID = int(os.getenv('REPORTS_CHANNEL_ID'))
 
 
-# Connect to Supabase Postgres Database
+# Connect to supabase Postgres Database
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
@@ -24,6 +24,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ==========================================
 # BOT EVENTS
 # ==========================================
+
 @bot.event
 async def on_ready():
 
@@ -71,7 +72,7 @@ async def on_ready():
     closed_price="The price you closed the trade at",
     pnl="Net profit or loss (use negative for loss)",
     setup="The setup or strategy used",
-    image="Chart screenshot (optional)",
+    image="Chart screenshot",
     notes="Any reflections on the trade (optional)"
 )
 @app_commands.choices(
@@ -89,7 +90,7 @@ async def log_trade(
     position_size: float,
     pnl: float, 
     setup: str, 
-    image: discord.Attachment = None,
+    image: discord.Attachment,
     notes: str = None
 ):
     
@@ -143,6 +144,7 @@ async def log_trade(
 # ==========================================
 # COMMAND 2: /stats
 # ==========================================
+
 @bot.tree.command(name="stats", description="Calculate win rate and total PnL.")
 @app_commands.describe(
     month="The month as a number (1-12) (optional)",
@@ -225,6 +227,7 @@ async def stats(
 # ==========================================
 # COMMAND 3: /del
 # ==========================================
+
 @bot.tree.command(name="del", description="Delete a logged trade if you made a mistake.")
 @app_commands.describe(trade_id="The ID number of the trade (found in the embed footer)")
 async def del_trade(interaction: discord.Interaction, trade_id: int):
